@@ -1,0 +1,35 @@
+{{define "base"}}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/base.css">
+    <!-- <link rel="stylesheet" href="/static/css/{{.Style}}"> -->
+    <link rel="icon" type="image/png" href="/static/images/FINDERR.png">
+    <title>{{.Title}}</title>
+</head>
+<body>
+    <!-- This is the header -->
+    <header>
+        <h1>{{.Title}}</h1>
+    </header>
+
+    <!-- This is the navigation -->
+    <nav>
+        <ul>
+            <li><a href="/">Home</a></li>
+            <li><a href="/about">About</a></li>
+        </ul>
+    </nav>
+
+    <!-- This is the main content area -->
+    <main>
+        {{template "content" .}}
+    </main>
+    <!-- <script src="/static/js/{{.Script}}"></script> -->
+</body>
+</html>
+
+{{end}}
