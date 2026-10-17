@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 )
@@ -81,4 +83,71 @@ func NewLogger(logDir string, level Level) (*Logger, error) {
 		output: io.MultiWriter(os.Stdout, file),
 		level: level,
 	}, nil
+}
+
+func (l *Logger) log(level Level, format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.closed || level < l.level {
+		return
+	}
+
+	message := fmt.Sprintf(format, args...)
+	message = strings.TrimRight(message, "\r\n")
+
+	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	entry := fmt.Sprintf(
+		"[%s] [%s] %s\n",
+		timestamp,
+		level.String(),
+		message,
+	)
+
+	if _, err := io.WriteString(l.output, entry); err != nil {
+		//
+		fmt.Fprintf(os.Stderr, "logger: writing failed: %v\n", err)
+	}
+}
+
+func (l *Logger) Debug(format string, args ...any) {
+	l.log(DEBUG, format, args...)
+}
+
+func (l *Logger) Info(format string, args ...any) {
+	l.log(INFO, format, args...)
+}
+
+func (l *Logger) Warn(format string, args ...any) {
+	l.log(WARN, format, args...)
+}
+
+func (l *Logger) Error(format string, args ...any) {
+	l.log(ERROR, format, args...)
+}
+
+//
+//
+func (l *Logger) Fatal(format string, args ...any) {
+	l.log(FATAL, format, args...)
+}
+
+// Panic
+func (l *Logger) Panic(format string, args ...any) {
+	message := fmt.Sprintf(format, args...)
+	l.log(ERROR, "PANIC: %s", message)
+	l.log(ERROR, "Stack trace:\n%s", debug.Stack())
+	panic(message)
+}
+
+func (l *Logger) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.closed {
+		return nil
+	}
+
+	l.closed = true
+	return l.file.Close()
 }
