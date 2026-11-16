@@ -15,6 +15,7 @@ var DB *gorm.DB
 // Ping the database to check if the connection is alive
 func ConnectDB() {
 	godotenv.Load() // Load environment variables from .env file
+	
 
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
 		os.Getenv("DB_HOST"),
