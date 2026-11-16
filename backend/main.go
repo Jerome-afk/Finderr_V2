@@ -3,6 +3,7 @@ package main
 import (
 	"finderr/services"
 	"finderr/utils"
+	"log"
 )
 
 func main() {
@@ -13,14 +14,13 @@ func main() {
 	}
 	// Connect to the database
 	logger.Info("Establishing connection to database...")
-	utils.ConnectDB()
+	if err := utils.ConnectDB(); err != nil {
+		log.Fatal(err)
+	}
 	logger.Info("Connected to the database")
 
 	// Run migrations
 	services.MigrateDB()
-
-	// Create admin user if not exists
-	services.CreateAdmin()
 
 	// Setup routes and start the server
 	router := SetupRoutes()
