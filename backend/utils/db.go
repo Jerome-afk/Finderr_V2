@@ -2,7 +2,6 @@ package utils
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -13,9 +12,8 @@ import (
 var DB *gorm.DB
 
 // Ping the database to check if the connection is alive
-func ConnectDB() {
-	godotenv.Load() // Load environment variables from .env file
-	
+func ConnectDB() error {
+	_ = godotenv.Load() // Load environment variables from .env file
 
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
 		os.Getenv("DB_HOST"),
@@ -26,11 +24,20 @@ func ConnectDB() {
 	)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-
 	if err != nil {
-		log.Fatal("Failed to connect to the database:", err)
+		return fmt.Errorf("failed to connect to the database: %w", err)
+	}
+
+	// Verify the database connection
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get database connection: %w", err)
+	}
+
+	if err := sqlDB.Ping(); err != nil {
+		return fmt.Errorf("PostgreSQL ping failed: %w", err)
 	}
 
 	DB = db
+	return nil
 }
-
