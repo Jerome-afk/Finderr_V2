@@ -1,167 +1,141 @@
-// This file contains middleware functions for the Gin web framework.
 package middleware
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"io"
-	"log"
-	"net/http"
-	"time"	
+	"encoding/json"
+	"errors"
+	"sync"
+	"time"
 )
 
-// Defining the session structure
+var ErrSessionExpired = errors.New("session expired")
+
 type Session struct {
-	createdAt    time.Time
-	lastActivity time.Time
-	id           string
-	data         map[string]any
+	mu           sync.RWMutex
+	ID           string
+	CreatedAt    time.Time
+	LastActivity time.Time
+	Data         map[string]any
 }
 
-// Session storage medium
-type SessionStore interface {
-	read(id string) (*Session, error)
-	write(session *Session) error
-	destroy(id string) error
-	gc(idleExpiration, absoluteExpiration time.Duration) error
+func generateSessionID() (string, error) {
+	b := make([]byte, 32)
+
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
-// SessionManager manages user sessions
-type SessionManager struct {
-	store              SessionStore
-	idleExpiration     time.Duration
-	absoluteExpiration time.Duration
-	cookieName         string
-}
-
-// Main function include handling sessions among other things.
-func generateSessionID() string {
-	id := make([]byte, 32)
-
-	_, err := io.ReadFull(rand.Reader, id)
+func NewSession() (*Session, error) {
+	id, err := generateSessionID()
 	if err != nil {
-		panic("failed to generate session ID")
+		return nil, err
 	}
 
-	return base64.RawURLEncoding.EncodeToString(id)
-}
+	now := time.Now().UTC()
 
-// Creating a new session
-func NewSession() *Session {
 	return &Session{
-		id:           generateSessionID(),
-		data:         make(map[string]any),
-		createdAt:    time.Now(),
-		lastActivity: time.Now(),
-	}
+		ID:           id,
+		CreatedAt:    now,
+		LastActivity: now,
+		Data:         make(map[string]any),
+	}, nil
 }
 
-func (m *SessionManager) gc(d time.Duration) {
-	ticker := time.NewTicker(d)
+func (s *Session) Get(key string) (any, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	for range ticker.C {
-		m.store.gc(m.idleExpiration, m.absoluteExpiration)
-	}
-}
-
-// Creating a new session manager
-func NewSessionManager(
-	store SessionStore,
-	gcInterval,
-	idleExpiration,
-	absoluteExpiration time.Duration,
-	cookieName string,
-) *SessionManager {
-	m := &SessionManager{
-		store:              store,
-		idleExpiration:     idleExpiration,
-		absoluteExpiration: absoluteExpiration,
-		cookieName:         cookieName,
-	}
-
-	go m.gc(gcInterval)
-
-	return m
-}
-
-func (s *Session) Get(key string) any {
-	return s.data[key]
+	value, exists := s.Data[key]
+	return value, exists
 }
 
 func (s *Session) Put(key string, value any) {
-	s.data[key] = value
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.Data[key] = value
 }
 
 func (s *Session) Delete(key string) {
-	delete(s.data, key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.Data, key)
 }
 
-// Session validation
-func (m *SessionManager) validate(session *Session) bool {
-	if time.Since(session.createdAt) > m.absoluteExpiration || time.Since(session.lastActivity) > m.idleExpiration {
+func (s *Session) Clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-		// Delete the session from the store if it has expired
-		err := m.store.destroy(session.id)
-		if err != nil {
-			// Log the error if session deletion fails
-			panic("failed to delete expired session: " + err.Error())
-		}
-
-		return false
-	}
-
-	return true
+	s.Data = make(map[string]any)
 }
 
-func (m *SessionManager) Start(r *http.Request) (*Session, *http.Request) {
-	var session *Session
+func (s *Session) snapshot() (map[string]any, time.Time, time.Time) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	// Check if the session cookie exists
-	cookie, err := r.Cookie(m.cookieName)
-	if err == nil {
-		session, err = m.store.read(cookie.Value)
-		if err != nil {
-			log.Printf("failed to read session: %v", err)
-		}
+	data := make(map[string]any, len(s.Data))
+
+	for k, v := range s.Data {
+		data[k] = v
 	}
 
-	// Generate a new session
-	if session == nil || !m.validate(session) {
-		session = NewSession()
-	}
-
-	// Attach the session to the request context
-	ctx := context.WithValue(r.Context(), sessionContextKey{}, session)
-	r = r.WithContext(ctx)
-
-	// Update the last activity timestamp
-	session.lastActivity = time.Now()
-
-	return session, r
+	return data, s.CreatedAt, s.LastActivity
 }
 
-func (m *SessionManager) Save(session *Session) error {
-	session.lastActivity = time.Now()
+func (s *Session) touch() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	err := m.store.write(session)
+	s.LastActivity = time.Now().UTC()
+}
+
+func (s *Session) expired(idle, absolute time.Duration) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	now := time.Now()
+
+	return now.Sub(s.LastActivity) > idle || now.Sub(s.CreatedAt) > absolute
+}
+
+func (s *Session) regenerateID() error {
+	id, err := generateSessionID()
 	if err != nil {
 		return err
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.ID = id
+	s.CreatedAt = time.Now().UTC()
+	s.LastActivity = s.CreatedAt
+
 	return nil
 }
 
-func (m *SessionManager) migrate(session *Session) error {
-	session.mu.Lock()
-	defer session.mu.Unlock()
+// Restore session data from Postgre
+func restoreSession(
+	id string,
+	data []byte,
+	createdAt time.Time,
+	lastActivity time.Time,
+) (*Session, error) {
+	values := make(map[string]any)
 
-	err := m.store.destroy(session.id)
-	if err != nil {
-		return err
+	if err := json.Unmarshal(data, &values); err != nil {
+		return nil, err
 	}
 
-	session.id = generateSessionID()
-
-	return nil
+	return &Session{
+		ID:           id,
+		CreatedAt:    createdAt,
+		LastActivity: lastActivity,
+		Data:         values,
+	}, nil
 }
