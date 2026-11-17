@@ -2,7 +2,7 @@ package main
 
 import (
 	"finderr/handlers"
-	"finderr/middleware"
+	"finderr/sessions"
 	"finderr/utils"
 	"log"
 	"time"
@@ -21,11 +21,11 @@ func SetupRoutes() *gin.Engine {
 	defer sqlDB.Close()
 
 	// Initialise session manager
-	store := middleware.NewPostgreSQLStore(sqlDB)
+	store := sessions.NewPostgreSQLStore(sqlDB)
 
-	sessions, err := middleware.NewSessionManager(
+	sessions, err := sessions.NewSessionManager(
 		store,
-		middleware.SessionConfig{
+		sessions.SessionConfig{
 			IdleExpiration:     30 * time.Minute,
 			AbsoluteExpiration: 24 * time.Hour,
 			GCInterval:         10 * time.Minute,
@@ -48,11 +48,7 @@ func SetupRoutes() *gin.Engine {
 	r.Static("/static", "./static")
 
 	// Define routes
-	r.GET("/login", handlers.LoginPage)
-	r.POST("/login", handlers.Login)
-
 	auth := r.Group("/")
-	auth.Use(middleware.AuthRequired())
 
 	auth.GET("/", handlers.Home)
 
