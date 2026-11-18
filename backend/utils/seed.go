@@ -176,7 +176,7 @@ func SeedRoles(db *gorm.DB) error {
 
 			if len(permissionNames) > 0 {
 				if err := tx.Where(
-					"names IN ?", permissionNames,
+					"name IN ?", permissionNames,
 				).Find(&permissions).Error; err != nil {
 					return err
 				}

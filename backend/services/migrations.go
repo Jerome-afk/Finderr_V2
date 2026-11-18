@@ -11,8 +11,13 @@ func MigrateDB() {
 		&models.Role{},
 		&models.Permission{},
 		&models.Session{},
+		&models.Invitation{},
 	)
 	if err != nil {
 		panic("Failed to migrate database: " + err.Error())
+	}
+
+	if err := utils.SeedRoles(utils.DB); err != nil {
+		panic("role seeding failed: " + err.Error())
 	}
 }
