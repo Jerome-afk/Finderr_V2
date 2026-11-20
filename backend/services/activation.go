@@ -12,12 +12,12 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type ActivationAccountInput struct {
+type ActivateAccountInput struct {
 	Token    string
 	Password string
 }
 
-func ActivationAccount(db *gorm.DB, input ActivationAccountInput) error {
+func ActivateAccount(db *gorm.DB, input ActivateAccountInput) error {
 	if db == nil {
 		return errors.New("database connection is nil")
 	}
@@ -35,7 +35,7 @@ func ActivationAccount(db *gorm.DB, input ActivationAccountInput) error {
 	tokenHash := HashInvitationToken(input.Token)
 	now := time.Now().UTC()
 
-	// Check that the invitation token exists
+	// Check that the invitation exists before performing the expensive hash.
 	var invitation models.Invitation
 
 	err := db.Where(
@@ -57,7 +57,7 @@ func ActivationAccount(db *gorm.DB, input ActivationAccountInput) error {
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
-		// Lock the invitation to prevent double activation
+		// Lock the invitation so two requests cannot activate it simultaneously.
 		var lockedInvitation models.Invitation
 
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -79,16 +79,28 @@ func ActivationAccount(db *gorm.DB, input ActivationAccountInput) error {
 
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			First(&user, lockedInvitation.UserID).Error; err != nil {
-				return fmt.Errorf("load invited user: %w", err)
+			return fmt.Errorf("load invited user: %w", err)
 		}
 
 		if user.IsActive {
 			return errors.New("this account has already been activated")
 		}
 
-		//TODO: Activate the account
+		// Activate the account and set its password.
+		if err := tx.Model(&user).Updates(map[string]interface{}{
+			"password_hash": passwordHash,
+			"is_active":     true,
+			"is_verified":   true,
+		}).Error; err != nil {
+			return fmt.Errorf("activate user: %w", err)
+		}
 
+		// Mark the invitation as consumed.
+		if err := tx.Model(&lockedInvitation).
+			Update("used_at", now).Error; err != nil {
+			return fmt.Errorf("consume invitation: %w", err)
+		}
+
+		return nil
 	})
-
-	return nil
 }
