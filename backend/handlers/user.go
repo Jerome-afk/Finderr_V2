@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"finderr/models"
 	"finderr/services"
 	"net/http"
@@ -113,5 +114,71 @@ func (h *Handler) ListUsers(c *gin.Context) {
 	}
 
 	var total int64
-	
+	if err := query.Model(&models.User{}).Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count users"})
+		return
+	}
+
+	offset := (page - 1) * limit
+
+	if err := query.Limit(limit).Offset(offset).Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve users"})
+		return
+	}
+
+	response := make([]models.UserResponse, 0, len(users))
+	for _, user := range users {
+		response = append(response, models.ToUserResponse(user))
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"users": response,
+		"pagination": gin.H{
+			"page": page,
+			"limit": limit,
+			"total": total,
+			"total_pages": (total + int64(limit) - 1) / int64(limit),
+		},
+	})
+}
+
+// TO DO: API TO GET USERS
+func (h *Handler) GetUser(c *gin.Context) {
+
+}
+
+func (h *Handler) DeleteUser(c *gin.Context) {
+	actorID, ok := getActorID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
+
+	if uint(id) == actorID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "you cannot delete your own account"})
+		return
+	}
+
+	var user models.User
+	if err := h.DB.First(&user, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve user"})
+		return
+	}
+
+	if err := h.DB.Delete(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete user"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "user deleted successfully"})
 }
