@@ -165,6 +165,68 @@ func (h *Handler) GetUser(c *gin.Context) {
 	c.JSON(http.StatusOK, models.ToUserResponse(user))
 }
 
+func (h *Handler) UpdateUser(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
+
+	var input struct {
+		Username   *string  `json:"username"`
+		Email      *string  `json:"email"`
+		IsActive   *bool    `json:"is_active"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	updates := make(map[string]interface{})
+
+	if input.Username != nil {
+		username := strings.TrimSpace(*input.Username)
+		if username == "" || len([]rune(username)) > 150 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid username"})
+			return
+		}
+		updates["username"] = username
+	}
+
+	if input.Email != nil {
+		email := strings.ToLower(strings.TrimSpace(*input.Email))
+		if email == "" || len(email) > 255 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid email"})
+			return
+		}
+		updates["email"] = email
+	}
+
+	if input.IsActive != nil {
+		updates["is_active"] = *input.IsActive
+	}
+
+	if len(updates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no changes supplied"})
+		return
+	}
+
+	result := h.DB.Model(&models.User{}).Where("id = ?", id).Updates(updates)
+
+	if result.Error != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to update user"})
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "user updated successfully"})
+}
+
 func (h *Handler) DeleteUser(c *gin.Context) {
 	actorID, ok := getActorID(c)
 	if !ok {
