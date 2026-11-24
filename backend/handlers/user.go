@@ -144,7 +144,25 @@ func (h *Handler) ListUsers(c *gin.Context) {
 
 // TO DO: API TO GET USERS
 func (h *Handler) GetUser(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
 
+	var user models.User
+
+	if err := h.DB.Preload("Roles").First(&user, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve user"})
+		return
+	}
+
+	c.JSON(http.StatusOK, models.ToUserResponse(user))
 }
 
 func (h *Handler) DeleteUser(c *gin.Context) {
